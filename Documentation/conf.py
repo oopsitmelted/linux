@@ -16,6 +16,9 @@ import sys
 import os
 import sphinx
 import shutil
+import subprocess
+
+from distutils.version import LooseVersion
 
 # helper
 # ------
@@ -145,6 +148,13 @@ if load_imgmath:
     math_renderer = 'imgmath'
 else:
     math_renderer = 'mathjax'
+
+try:
+    hglyph_ver = subprocess.check_output(["hieroglyph", "--version"])
+    if LooseVersion(hglyph_ver) > LooseVersion("1.0.0"):
+	    extensions.append('hieroglyph')
+except:
+    None
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
