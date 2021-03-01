@@ -150,9 +150,9 @@ else:
     math_renderer = 'mathjax'
 
 try:
-    hglyph_ver = subprocess.check_output(["hieroglyph", "--version"])
+    hglyph_ver = subprocess.check_output(["hieroglyph", "--version"]).decode('utf-8')
     if LooseVersion(hglyph_ver) > LooseVersion("1.0.0"):
-	    extensions.append('hieroglyph')
+        extensions.append("hieroglyph")
 except:
     None
 
