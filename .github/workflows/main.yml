@@ -1,10 +1,10 @@
 on:
   push:
     branches:
-      - master
+      - lk-labs-v6.1
   pull_request:
     branches:
-      - master
+      - lk-labs-v6.1
 
 jobs:
   build_job:
