@@ -2,6 +2,7 @@
 ccflags-y += -Wno-unused-function -Wno-unused-label -Wno-unused-variable 
 obj-m += ./device_drivers/kernel/
 obj-m += ./device_drivers/extra/char-driver-lin/
+obj-m += ./interrupts/
 obj-m += ./kernel_api/6-list-sync/
 obj-m += ./kernel_api/4-list/
 obj-m += ./kernel_api/1-mem/
