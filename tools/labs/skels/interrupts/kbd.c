@@ -1,6 +1,7 @@
 #include "asm-generic/errno-base.h"
 #include "linux/irqreturn.h"
 #include "linux/printk.h"
+#include "linux/spinlock_types.h"
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -23,8 +24,8 @@ MODULE_LICENSE("GPL");
 #define KBD_NR_MINORS	1
 
 #define I8042_KBD_IRQ		1
-#define I8042_STATUS_REG	0x65
-#define I8042_DATA_REG		0x61
+#define I8042_STATUS_REG	0x64
+#define I8042_DATA_REG		0x60
 
 #define BUFFER_SIZE		1024
 #define SCANCODE_RELEASED_MASK	0x80
@@ -32,6 +33,7 @@ MODULE_LICENSE("GPL");
 struct kbd {
 	struct cdev cdev;
 	/* TODO 3: add spinlock */
+  spinlock_t lock;
 	char buf[BUFFER_SIZE];
 	size_t put_idx, get_idx, count;
 } devs[1];
@@ -85,12 +87,22 @@ static void put_char(struct kbd *data, char c)
 static bool get_char(char *c, struct kbd *data)
 {
 	/* TODO 4: get char from buffer; update count and get_idx */
-	return false;
+  if (!data->count)
+    return false;
+
+  *c = data->buf[data->get_idx];
+  data->get_idx = (data->get_idx + 1) % BUFFER_SIZE;
+  data->count--;
+
+	return true;
 }
 
 static void reset_buffer(struct kbd *data)
 {
 	/* TODO 5: reset count, put_idx, get_idx */
+  data->count = 0;
+  data->get_idx = 0;
+  data->put_idx = 0;
 }
 
 /*
@@ -100,19 +112,32 @@ static inline u8 i8042_read_data(void)
 {
 	u8 val;
 	/* TODO 3: Read DATA register (8 bits). */
+  val = inb(I8042_DATA_REG);
 	return val;
 }
 
 /* TODO 2: implement interrupt handler */
 static irqreturn_t kbd_interrupt_handler(int irq_no, void *dev_id)
 {
-  printk(KERN_CRIT "key pressed");
+	/* TODO 3: read the scancode */
+  u8 scancode = i8042_read_data();
+	/* TODO 3: interpret the scancode */
+  int pressed = is_key_press(scancode);
+  int ch = get_ascii(scancode);
+  struct kbd *data = (struct kbd *) dev_id;
+
+	/* TODO 3: display information about the keystrokes */
+  pr_info("IRQ %d: scancode = 0x%x (%u) pressed=%d ch=%c\n", irq_no, scancode, scancode, pressed, ch);
+
+	/* TODO 3: store ASCII key to buffer */
+  if (is_key_press(scancode))
+  {
+    spin_lock(&data->lock);
+    put_char(data, ch);
+    spin_unlock(&data->lock);
+  }
   return IRQ_NONE;
 }
-	/* TODO 3: read the scancode */
-	/* TODO 3: interpret the scancode */
-	/* TODO 3: display information about the keystrokes */
-	/* TODO 3: store ASCII key to buffer */
 
 static int kbd_open(struct inode *inode, struct file *file)
 {
@@ -130,13 +155,42 @@ static int kbd_release(struct inode *inode, struct file *file)
 }
 
 /* TODO 5: add write operation and reset the buffer */
+static int kbd_write(struct file *file, const char __user *user_buffer,
+                    size_t size, loff_t * offset)
+{
+	struct kbd *data = (struct kbd *) file->private_data;
+
+  reset_buffer(data); 
+  return size;
+}
 
 static ssize_t kbd_read(struct file *file,  char __user *user_buffer,
 			size_t size, loff_t *offset)
 {
 	struct kbd *data = (struct kbd *) file->private_data;
 	size_t read = 0;
+  unsigned long flags;
+  bool c_avail;
+  char c;
+
+  if (size <= 0)
+    return 0;
+
 	/* TODO 4: read data from buffer */
+  while (true)
+  {
+    spin_lock_irqsave(&data->lock, flags);
+    c_avail = get_char(&c, data); 
+    spin_unlock_irqrestore(&data->lock,flags);
+
+    if (!c_avail)
+      break;
+
+    put_user(c,user_buffer + read);
+
+    if (++read == size)
+      break;
+  }
 	return read;
 }
 
@@ -146,11 +200,14 @@ static const struct file_operations kbd_fops = {
 	.release = kbd_release,
 	.read = kbd_read,
 	/* TODO 5: add write operation */
+  .write = kbd_write,
 };
 
 static int kbd_init(void)
 {
 	int err;
+
+  spin_lock_init(&devs[0].lock);
 
 	err = register_chrdev_region(MKDEV(KBD_MAJOR, KBD_MINOR),
 				     KBD_NR_MINORS, MODULE_NAME);
@@ -160,10 +217,10 @@ static int kbd_init(void)
 	}
 
 	/* TODO 1: request the keyboard I/O ports */
-  if (!request_region(I8042_DATA_REG, 1, "kbd"))
+  if (!request_region(I8042_DATA_REG+1, 1, "kbd"))
     return -ENODEV;
 
-  if (!request_region(I8042_STATUS_REG, 1, "kbd"))
+  if (!request_region(I8042_STATUS_REG+1, 1, "kbd"))
     return -ENODEV;
 
 	/* TODO 3: initialize spinlock */
@@ -181,8 +238,8 @@ static int kbd_init(void)
 	return 0;
 
 	/*TODO 2: release regions in case of error */
-  release_region(I8042_STATUS_REG, 1);
-  release_region(I8042_DATA_REG, 1);
+  release_region(I8042_STATUS_REG+1, 1);
+  release_region(I8042_DATA_REG+1, 1);
 
 out_unregister:
 	unregister_chrdev_region(MKDEV(KBD_MAJOR, KBD_MINOR),
@@ -198,8 +255,8 @@ static void kbd_exit(void)
 	/* TODO 2: Free IRQ. */
 
 	/* TODO 1: release keyboard I/O ports */
-  release_region(I8042_DATA_REG, 1);
-  release_region(I8042_STATUS_REG, 1);
+  release_region(I8042_DATA_REG+1, 1);
+  release_region(I8042_STATUS_REG+1, 1);
 
 	unregister_chrdev_region(MKDEV(KBD_MAJOR, KBD_MINOR),
 				 KBD_NR_MINORS);
