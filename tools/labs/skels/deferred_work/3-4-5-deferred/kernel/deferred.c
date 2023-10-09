@@ -6,6 +6,7 @@
  * Code skeleton.
  */
 
+#include "linux/workqueue.h"
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -40,7 +41,9 @@ static struct my_device_data {
 	/* TODO 1: add timer */
   struct timer_list timer;
 	/* TODO 2: add flag */
+  int timer_type;
 	/* TODO 3: add work */
+  struct work_struct work;
 	/* TODO 4: add list for monitored processes */
 	/* TODO 4: add spinlock to protect list */
 } dev;
@@ -50,6 +53,7 @@ static void alloc_io(void)
 	set_current_state(TASK_INTERRUPTIBLE);
 	schedule_timeout(5 * HZ);
 	pr_info("Yawn! I've been sleeping for 5 seconds.\n");
+  pr_info("PID: %d, %s\n", current->pid, current->comm);
 }
 
 static struct mon_proc *get_proc(pid_t pid)
@@ -75,9 +79,10 @@ static struct mon_proc *get_proc(pid_t pid)
 
 
 /* TODO 3: define work handler */
-
-#define ALLOC_IO_DIRECT
-/* TODO 3: undef ALLOC_IO_DIRECT*/
+void work_handler(struct work_struct *work)
+{
+  alloc_io();
+}
 
 static void timer_handler(struct timer_list *tl)
 {
@@ -85,7 +90,18 @@ static void timer_handler(struct timer_list *tl)
   pr_info("PID: %d, %s\n", current->pid, current->comm);
   
 	/* TODO 2: check flags: TIMER_TYPE_SET or TIMER_TYPE_ALLOC */
-		/* TODO 3: schedule work */
+  switch (dev.timer_type)
+  {
+    case TIMER_TYPE_ALLOC:
+      {
+		    /* TODO 3: schedule work */
+        schedule_work(&dev.work);
+        break;
+      }
+
+    default:
+      break;
+  }
 		/* TODO 4: iterate the list and check the proccess state */
 			/* TODO 4: if task is dead print info ... */
 			/* TODO 4: ... decrement task usage counter ... */
@@ -117,6 +133,7 @@ static long deferred_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	switch (cmd) {
 		case MY_IOCTL_TIMER_SET:
 			/* TODO 2: set flag */
+      dev.timer_type = TIMER_TYPE_SET;
 			/* TODO 1: schedule timer */
       mod_timer(&dev.timer, jiffies + arg * HZ);
 			break;
@@ -126,6 +143,8 @@ static long deferred_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 			break;
 		case MY_IOCTL_TIMER_ALLOC:
 			/* TODO 2: set flag and schedule timer */
+      dev.timer_type = TIMER_TYPE_ALLOC;
+      mod_timer(&dev.timer, jiffies + arg * HZ);
 			break;
 		case MY_IOCTL_TIMER_MON:
 		{
@@ -160,7 +179,10 @@ static int deferred_init(void)
 	}
 
 	/* TODO 2: Initialize flag. */
+  dev.timer_type = TIMER_TYPE_NONE;
+
 	/* TODO 3: Initialize work. */
+  INIT_WORK(&dev.work, work_handler);
 
 	/* TODO 4: Initialize lock and list. */
 
@@ -185,6 +207,7 @@ static void deferred_exit(void)
 	/* TODO 1: Cleanup: make sure the timer is not running after exiting. */
   del_timer(&dev.timer);
 	/* TODO 3: Cleanup: make sure the work handler is not scheduled. */
+  cancel_work_sync(&dev.work);
 
 	/* TODO 4: Cleanup the monitered process list */
 		/* TODO 4: ... decrement task usage counter ... */
